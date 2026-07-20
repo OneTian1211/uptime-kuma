@@ -56,6 +56,8 @@ export default {
             statusPageListLoaded: false,
             statusPageList: [],
             proxyList: [],
+            subscribedMonitorIDs: new Set(),
+            loadedGroupChildren: new Set(),
             connectionErrorMsg: `${this.$t("Cannot connect to the socket server.")} ${this.$t("Reconnecting...")}`,
             showReverseProxyGuide: true,
             cloudflared: {
@@ -73,6 +75,13 @@ export default {
 
     created() {
         this.initSocketIO();
+    },
+
+    mounted() {
+        // Deep-link safety net: if the URL points to a child monitor that
+        // has not yet been loaded into monitorList, subscribe so realtime
+        // events still arrive even if its parent group is off-screen.
+        this.subscribeCurrentRouteMonitor();
     },
 
     methods: {
@@ -147,6 +156,24 @@ export default {
             socket.on("monitorList", (data) => {
                 this.assignMonitorUrlParser(data);
                 this.monitorList = data;
+
+                // Fresh login payload: discard any stale subscription and
+                // child-load tracking so the new session starts clean.
+                this.subscribedMonitorIDs = new Set();
+                this.loadedGroupChildren = new Set();
+
+                // Subscribe to root monitors so we receive their realtime
+                // heartbeat / uptime / avgPing / certInfo / domainInfo events.
+                // Children are subscribed lazily on group expand.
+                const rootIDs = Object.values(data)
+                    .filter((m) => m.parent === null)
+                    .map((m) => m.id);
+                this.subscribeMonitors(rootIDs);
+
+                // If the current URL is a deep link into a child monitor
+                // (e.g. /dashboard/123) and it is not in the root list,
+                // subscribe to it so realtime events still arrive.
+                this.subscribeCurrentRouteMonitor();
             });
 
             socket.on("updateMonitorIntoList", (data) => {
@@ -154,11 +181,16 @@ export default {
                 Object.entries(data).forEach(([monitorID, updatedMonitor]) => {
                     this.monitorList[monitorID] = updatedMonitor;
                 });
+                this.subscribeMonitors(Object.keys(data).map((id) => parseInt(id)));
             });
 
             socket.on("deleteMonitorFromList", (monitorID) => {
                 if (this.monitorList[monitorID]) {
                     delete this.monitorList[monitorID];
+                }
+                const numID = parseInt(monitorID);
+                if (Number.isInteger(numID)) {
+                    this.unsubscribeMonitors([numID]);
                 }
             });
 
@@ -533,6 +565,94 @@ export default {
         },
 
         /**
+         * Subscribe this socket to realtime events for the given monitor IDs.
+         * Idempotent: IDs already subscribed are skipped.
+         * @param {number[]} monitorIDs Array of monitor IDs to subscribe to
+         * @returns {void}
+         */
+        subscribeMonitors(monitorIDs) {
+            if (!Array.isArray(monitorIDs) || monitorIDs.length === 0) {
+                return;
+            }
+            const newIDs = monitorIDs.filter((id) => !this.subscribedMonitorIDs.has(id));
+            if (newIDs.length === 0) {
+                return;
+            }
+            newIDs.forEach((id) => this.subscribedMonitorIDs.add(id));
+            socket.emit("subscribeMonitors", newIDs, (res) => {
+                if (!res || !res.ok) {
+                    newIDs.forEach((id) => this.subscribedMonitorIDs.delete(id));
+                }
+            });
+        },
+
+        /**
+         * Unsubscribe this socket from realtime events for the given monitor IDs.
+         * @param {number[]} monitorIDs Array of monitor IDs to unsubscribe from
+         * @returns {void}
+         */
+        unsubscribeMonitors(monitorIDs) {
+            if (!Array.isArray(monitorIDs) || monitorIDs.length === 0) {
+                return;
+            }
+            const existingIDs = monitorIDs.filter((id) => this.subscribedMonitorIDs.has(id));
+            if (existingIDs.length === 0) {
+                return;
+            }
+            existingIDs.forEach((id) => this.subscribedMonitorIDs.delete(id));
+            socket.emit("unsubscribeMonitors", existingIDs, (res) => {
+                if (!res || !res.ok) {
+                    existingIDs.forEach((id) => this.subscribedMonitorIDs.add(id));
+                }
+            });
+        },
+
+        /**
+         * Fetch children of a group monitor and merge them into monitorList.
+         * Auto-subscribes the socket to each returned child for realtime events.
+         * Marks the parent group as loaded on success so subsequent expand/collapse
+         * toggles skip the request.
+         * @param {number} parentID ID of the parent (group) monitor
+         * @param {socketCB} callback Optional callback receiving { ok, list, ... }
+         * @returns {void}
+         */
+        getMonitorChildren(parentID, callback) {
+            socket.emit("getMonitorChildren", parentID, (res) => {
+                if (res && res.ok && res.list) {
+                    this.assignMonitorUrlParser(res.list);
+                    Object.entries(res.list).forEach(([id, monitor]) => {
+                        this.monitorList[id] = monitor;
+                    });
+                    this.subscribeMonitors(Object.keys(res.list).map((id) => parseInt(id)));
+                    this.loadedGroupChildren.add(parentID);
+                }
+                if (typeof callback === "function") {
+                    callback(res);
+                }
+            });
+        },
+
+        /**
+         * Subscribe to the monitor referenced by the current route, if any.
+         * Acts as a deep-link safety net so that realtime events for a child
+         * monitor are delivered even when its parent group is not yet
+         * expanded or not in the virtual scroller viewport.
+         * @param {string|number} id Optional route id; defaults to current route
+         * @returns {void}
+         */
+        subscribeCurrentRouteMonitor(id) {
+            const routeID = id !== undefined ? id : this.$route?.params?.id;
+            if (routeID === undefined || routeID === null || routeID === "") {
+                return;
+            }
+            const numID = parseInt(routeID);
+            if (!Number.isInteger(numID)) {
+                return;
+            }
+            this.subscribeMonitors([numID]);
+        },
+
+        /**
          * Get list of maintenances
          * @param {socketCB} callback Callback for socket response
          * @returns {void}
@@ -889,6 +1009,13 @@ export default {
             }
 
             this.initSocketIO();
+        },
+
+        // Deep-link safety net: subscribe to the route's monitor ID whenever
+        // the URL changes so realtime events for deep-linked children arrive
+        // even if their parent group is off-screen.
+        "$route.params.id"(id) {
+            this.subscribeCurrentRouteMonitor(id);
         },
     },
 };

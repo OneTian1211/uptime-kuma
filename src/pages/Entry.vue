@@ -18,10 +18,13 @@ export default {
         };
     },
     async mounted() {
-        // There are only 3 cases that could come in here.
-        // 1. Matched status Page domain name
-        // 2. Vue Frontend Dev
-        // 3. Vue Frontend Dev (not setup database yet)
+        // Pre-connect the socket in parallel with the entry-page lookup so
+        // that by the time we route to /dashboard the websocket handshake
+        // has already happened, saving one round-trip of perceived latency.
+        if (typeof this.$root.initSocketIO === "function") {
+            this.$root.initSocketIO(true);
+        }
+
         let res;
         try {
             res = (await axios.get("/api/entry-page")).data;
@@ -35,7 +38,6 @@ export default {
                 if (entryPage?.startsWith("statusPage-")) {
                     this.$router.push("/status/" + entryPage.replace("statusPage-", ""));
                 } else {
-                    // should the old setting style still exist here?
                     this.$router.push("/dashboard");
                 }
             } else if (res.type === "setup-database") {

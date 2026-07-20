@@ -185,6 +185,7 @@ const { dockerSocketHandler } = require("./socket-handlers/docker-socket-handler
 const { maintenanceSocketHandler } = require("./socket-handlers/maintenance-socket-handler");
 const { apiKeySocketHandler } = require("./socket-handlers/api-key-socket-handler");
 const { generalSocketHandler } = require("./socket-handlers/general-socket-handler");
+const { monitorSubscriptionSocketHandler } = require("./socket-handlers/monitor-subscription-socket-handler");
 const { Settings } = require("./settings");
 const apicache = require("./modules/apicache");
 const { resetChrome } = require("./monitor-types/real-browser-monitor-type");
@@ -1718,6 +1719,7 @@ let needSetup = false;
         remoteBrowserSocketHandler(socket);
         generalSocketHandler(socket, server);
         chartSocketHandler(socket);
+        monitorSubscriptionSocketHandler(socket);
 
         log.debug("server", "added all socket handlers");
 
@@ -1807,7 +1809,10 @@ async function afterLogin(socket, user) {
     socket.userID = user.id;
     socket.join(user.id);
 
-    let monitorList = await server.sendMonitorList(socket);
+    // Send root-only monitor list; child monitors are loaded on demand
+    // when the client subscribes via monitorSubscriptionSocketHandler.
+    await server.sendMonitorList(socket, { rootOnly: true });
+
     await Promise.allSettled([
         sendInfo(socket),
         server.sendMaintenanceList(socket),
@@ -1820,14 +1825,6 @@ async function afterLogin(socket, user) {
     ]);
 
     await StatusPage.sendStatusPageList(io, socket);
-
-    const monitorPromises = [];
-    for (let monitorID in monitorList) {
-        monitorPromises.push(sendHeartbeatList(socket, monitorID));
-        monitorPromises.push(Monitor.sendStats(io, monitorID, user.id));
-    }
-
-    await Promise.all(monitorPromises);
 
     // Set server timezone from client browser if not set
     // It should be run once only

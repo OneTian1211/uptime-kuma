@@ -607,6 +607,35 @@ exports.getTotalClientInRoom = (io, roomName) => {
 };
 
 /**
+ * Get the room name for a monitor's subscribers
+ * @param {number} monitorID ID of monitor
+ * @returns {string} Room name
+ */
+exports.monitorRoomName = (monitorID) => `monitor_${monitorID}`;
+
+/**
+ * Emit an event only to sockets subscribed to the monitor room
+ * @param {Server} io Socket server instance
+ * @param {number} monitorID ID of monitor
+ * @param {string} event Event name
+ * @param  {...any} args Arguments to pass to listeners
+ * @returns {void}
+ */
+exports.emitToMonitor = (io, monitorID, event, ...args) => {
+    io.to(exports.monitorRoomName(monitorID)).emit(event, ...args);
+};
+
+/**
+ * Get the total number of sockets subscribed to a monitor room
+ * @param {Server} io Socket server instance
+ * @param {number} monitorID ID of monitor
+ * @returns {number} Number of subscribers
+ */
+exports.getMonitorSubscribersCount = (io, monitorID) => {
+    return exports.getTotalClientInRoom(io, exports.monitorRoomName(monitorID));
+};
+
+/**
  * Allow CORS all origins if development
  * @param {object} res Response object from axios
  * @returns {void}

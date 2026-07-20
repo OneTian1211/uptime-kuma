@@ -6,7 +6,7 @@ const { R } = require("redbean-node");
 const { UptimeKumaServer } = require("./uptime-kuma-server");
 const server = UptimeKumaServer.getInstance();
 const io = server.io;
-const { setting } = require("./util-server");
+const { setting, emitToMonitor } = require("./util-server");
 const checkVersion = require("./check-version");
 const Database = require("./database");
 
@@ -57,7 +57,7 @@ async function sendHeartbeatList(socket, monitorID, toUser = false, overwrite = 
     let result = list.reverse();
 
     if (toUser) {
-        io.to(socket.userID).emit("heartbeatList", monitorID, result, overwrite);
+        emitToMonitor(io, monitorID, "heartbeatList", monitorID, result, overwrite);
     } else {
         socket.emit("heartbeatList", monitorID, result, overwrite);
     }

@@ -94,28 +94,47 @@
             </div>
         </div>
         <div
-            ref="monitorList"
             class="monitor-list px-2"
             :class="{ scrollbar: scrollbar }"
             :style="monitorListStyle"
             data-testid="monitor-list"
         >
-            <div v-if="Object.keys($root.monitorList).length === 0" class="text-center mt-3">
+            <div v-if="$root.socket.initedSocketIO && Object.keys($root.monitorList).length === 0" class="text-center mt-3">
                 {{ $t("No Monitors, please") }}
                 <router-link to="/add">{{ $t("add one") }}</router-link>
             </div>
 
-            <MonitorListItem
-                v-for="item in sortedMonitorList"
-                :key="`${item.id}-${collapseKey}`"
-                :monitor="item"
-                :isSelectMode="selectMode"
-                :isSelected="isSelected"
-                :select="select"
-                :deselect="deselect"
-                :filter-func="filterFunc"
-                :sort-func="sortFunc"
-            />
+            <div v-else-if="Object.keys($root.monitorList).length === 0" class="p-2">
+                <Skeleton v-for="i in 6" :key="i" height="44px" />
+            </div>
+
+            <DynamicScroller
+                v-else
+                ref="scroller"
+                :items="sortedMonitorList"
+                :min-item-size="54"
+                key-field="id"
+                :style="{ height: '100%' }"
+            >
+                <template #default="{ item, index, active }">
+                    <DynamicScrollerItem
+                        :item="item"
+                        :active="active"
+                        :data-index="index"
+                    >
+                        <MonitorListItem
+                            :key="`${item.id}-${collapseKey}`"
+                            :monitor="item"
+                            :isSelectMode="selectMode"
+                            :isSelected="isSelected"
+                            :select="select"
+                            :deselect="deselect"
+                            :filter-func="filterFunc"
+                            :sort-func="sortFunc"
+                        />
+                    </DynamicScrollerItem>
+                </template>
+            </DynamicScroller>
         </div>
     </div>
 
@@ -132,6 +151,9 @@
 import Confirm from "../components/Confirm.vue";
 import MonitorListItem from "../components/MonitorListItem.vue";
 import MonitorListFilter from "./MonitorListFilter.vue";
+import Skeleton from "./Skeleton.vue";
+import { DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
+import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import { getMonitorRelativeURL } from "../util.ts";
 
 export default {
@@ -139,6 +161,9 @@ export default {
         Confirm,
         MonitorListItem,
         MonitorListFilter,
+        Skeleton,
+        DynamicScroller,
+        DynamicScrollerItem,
     },
     props: {
         /** Should the scrollbar be shown */

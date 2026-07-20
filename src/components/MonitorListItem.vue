@@ -62,18 +62,24 @@
 
         <transition name="slide-fade-up">
             <div v-if="!isCollapsed" class="childs">
-                <MonitorListItem
-                    v-for="(item, index) in sortedChildMonitorList"
-                    :key="index"
-                    :monitor="item"
-                    :isSelectMode="isSelectMode"
-                    :isSelected="isSelected"
-                    :select="select"
-                    :deselect="deselect"
-                    :depth="depth + 1"
-                    :filter-func="filterFunc"
-                    :sort-func="sortFunc"
-                />
+                <div v-if="loadingChildren" class="text-center py-2 text-secondary">
+                    <font-awesome-icon icon="spinner" spin />
+                    <span class="ms-2">{{ $t("Loading...") }}</span>
+                </div>
+                <template v-else>
+                    <MonitorListItem
+                        v-for="(item, index) in sortedChildMonitorList"
+                        :key="index"
+                        :monitor="item"
+                        :isSelectMode="isSelectMode"
+                        :isSelected="isSelected"
+                        :select="select"
+                        :deselect="deselect"
+                        :depth="depth + 1"
+                        :filter-func="filterFunc"
+                        :sort-func="sortFunc"
+                    />
+                </template>
             </div>
         </transition>
     </div>
@@ -138,6 +144,8 @@ export default {
         return {
             isCollapsed: true,
             dragOverCount: 0,
+            loadingChildren: false,
+            isAlive: true,
         };
     },
     computed: {
@@ -198,10 +206,29 @@ export default {
 
         this.isCollapsed = storageObject[`monitor_${this.monitor.id}`];
     },
+    mounted() {
+        // If the group is initially expanded (e.g. from localStorage or deep-link),
+        // load its children now. changeCollapsed handles the user-toggle case.
+        if (!this.isCollapsed && this.monitor.type === "group" && !this.isChildrenLoaded() && !this.loadingChildren) {
+            this.loadChildren();
+        }
+    },
+    beforeUnmount() {
+        this.isAlive = false;
+    },
     methods: {
         /**
+         * Whether this group's children have already been fetched.
+         * Tracked on $root so it survives DynamicScroller recycling.
+         * @returns {boolean} True if children are already loaded
+         */
+        isChildrenLoaded() {
+            return this.$root.loadedGroupChildren.has(this.monitor.id);
+        },
+        /**
          * Changes the collapsed value of the current monitor and saves
-         * it to local storage
+         * it to local storage. When expanding a group, lazily loads its
+         * children on first expand.
          * @returns {void}
          */
         changeCollapsed() {
@@ -216,6 +243,28 @@ export default {
             storageObject[`monitor_${this.monitor.id}`] = this.isCollapsed;
 
             window.localStorage.setItem("monitorCollapsed", JSON.stringify(storageObject));
+
+            // Lazily load children on first expand of a group.
+            if (!this.isCollapsed && this.monitor.type === "group" && !this.isChildrenLoaded() && !this.loadingChildren) {
+                this.loadChildren();
+            }
+        },
+        /**
+         * Fetch direct children of this group monitor and merge them into
+         * the root monitorList. Subscription and the loaded-children flag
+         * are updated inside `getMonitorChildren`. Idempotent: a second
+         * call before the first completes is a no-op thanks to
+         * `loadingChildren` and `isChildrenLoaded`.
+         * @returns {void}
+         */
+        loadChildren() {
+            this.loadingChildren = true;
+            this.$root.getMonitorChildren(this.monitor.id, (res) => {
+                if (!this.isAlive) {
+                    return;
+                }
+                this.loadingChildren = false;
+            });
         },
         /**
          * Initializes the drag operation if the monitor is draggable.

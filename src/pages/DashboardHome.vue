@@ -5,7 +5,16 @@
                 {{ $t("Quick Stats") }}
             </h1>
 
-            <div class="shadow-box big-padding text-center mb-3">
+            <div v-if="!hasInitialData" class="shadow-box big-padding text-center mb-3">
+                <div class="row">
+                    <div v-for="i in 5" :key="i" class="col">
+                        <Skeleton height="20px" width="50%" class="mx-auto mb-2" />
+                        <Skeleton height="36px" width="60%" class="mx-auto" />
+                    </div>
+                </div>
+            </div>
+
+            <div v-else class="shadow-box big-padding text-center mb-3">
                 <div class="row">
                     <div class="col">
                         <h3>{{ $t("Up") }}</h3>
@@ -115,6 +124,7 @@
 <script>
 import Status from "../components/Status.vue";
 import Datetime from "../components/Datetime.vue";
+import Skeleton from "../components/Skeleton.vue";
 import Pagination from "v-pagination-3";
 import Confirm from "../components/Confirm.vue";
 
@@ -122,6 +132,7 @@ export default {
     components: {
         Datetime,
         Status,
+        Skeleton,
         Pagination,
         Confirm,
     },
@@ -151,6 +162,9 @@ export default {
         },
         tableColumnCount() {
             return this.showGroupColumn ? 5 : 4;
+        },
+        hasInitialData() {
+            return Object.keys(this.$root.monitorList).length > 0;
         },
     },
     watch: {

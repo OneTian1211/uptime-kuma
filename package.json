@@ -222,6 +222,7 @@
         "vue-qrcode": "~1.0.1",
         "vue-router": "~4.2.5",
         "vue-toastification": "~2.0.0-rc.5",
+        "vue-virtual-scroller": "~2.0.0-beta.8",
         "vuedraggable": "~4.1.0",
         "wait-on": "^7.2.0",
         "whatwg-url": "~12.0.1"

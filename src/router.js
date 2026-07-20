@@ -4,33 +4,34 @@ import EmptyLayout from "./layouts/EmptyLayout.vue";
 import Layout from "./layouts/Layout.vue";
 import Dashboard from "./pages/Dashboard.vue";
 import DashboardHome from "./pages/DashboardHome.vue";
-import Details from "./pages/Details.vue";
-import EditMonitor from "./pages/EditMonitor.vue";
-import EditMaintenance from "./pages/EditMaintenance.vue";
-import List from "./pages/List.vue";
-const Settings = () => import("./pages/Settings.vue");
-import Setup from "./pages/Setup.vue";
-import StatusPage from "./pages/StatusPage.vue";
 import Entry from "./pages/Entry.vue";
-import ManageStatusPage from "./pages/ManageStatusPage.vue";
-import AddStatusPage from "./pages/AddStatusPage.vue";
-import NotFound from "./pages/NotFound.vue";
-import DockerHosts from "./components/settings/Docker.vue";
-import ManageMaintenance from "./pages/ManageMaintenance.vue";
-import APIKeys from "./components/settings/APIKeys.vue";
-import SetupDatabase from "./pages/SetupDatabase.vue";
+
+const Details = () => import("./pages/Details.vue");
+const EditMonitor = () => import("./pages/EditMonitor.vue");
+const EditMaintenance = () => import("./pages/EditMaintenance.vue");
+const List = () => import("./pages/List.vue");
+const Settings = () => import("./pages/Settings.vue");
+const Setup = () => import("./pages/Setup.vue");
+const StatusPage = () => import("./pages/StatusPage.vue");
+const ManageStatusPage = () => import("./pages/ManageStatusPage.vue");
+const AddStatusPage = () => import("./pages/AddStatusPage.vue");
+const NotFound = () => import("./pages/NotFound.vue");
+const ManageMaintenance = () => import("./pages/ManageMaintenance.vue");
+const SetupDatabase = () => import("./pages/SetupDatabase.vue");
 
 // Settings - Sub Pages
-import Appearance from "./components/settings/Appearance.vue";
-import General from "./components/settings/General.vue";
+const DockerHosts = () => import("./components/settings/Docker.vue");
+const APIKeys = () => import("./components/settings/APIKeys.vue");
+const Appearance = () => import("./components/settings/Appearance.vue");
+const General = () => import("./components/settings/General.vue");
 const Notifications = () => import("./components/settings/Notifications.vue");
-import ReverseProxy from "./components/settings/ReverseProxy.vue";
-import Tags from "./components/settings/Tags.vue";
-import MonitorHistory from "./components/settings/MonitorHistory.vue";
+const ReverseProxy = () => import("./components/settings/ReverseProxy.vue");
+const Tags = () => import("./components/settings/Tags.vue");
+const MonitorHistory = () => import("./components/settings/MonitorHistory.vue");
 const Security = () => import("./components/settings/Security.vue");
-import Proxies from "./components/settings/Proxies.vue";
-import About from "./components/settings/About.vue";
-import RemoteBrowsers from "./components/settings/RemoteBrowsers.vue";
+const Proxies = () => import("./components/settings/Proxies.vue");
+const About = () => import("./components/settings/About.vue");
+const RemoteBrowsers = () => import("./components/settings/RemoteBrowsers.vue");
 
 const routes = [
     {

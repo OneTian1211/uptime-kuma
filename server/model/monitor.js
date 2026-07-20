@@ -42,6 +42,8 @@ const {
     checkCertificateHostname,
     encodeBase64,
     checkCertExpiryNotifications,
+    emitToMonitor,
+    getMonitorSubscribersCount,
 } = require("../util-server");
 const { R } = require("redbean-node");
 const { BeanModel } = require("redbean-node/dist/bean-model");
@@ -1102,7 +1104,7 @@ class Monitor extends BeanModel {
 
             // Send to frontend
             log.debug("monitor", `[${this.name}] Send to socket`);
-            io.to(this.user_id).emit("heartbeat", bean.toJSON());
+            emitToMonitor(io, this.id, "heartbeat", bean.toJSON());
             Monitor.sendStats(io, this.id, this.user_id);
 
             // Store to database
@@ -1359,30 +1361,30 @@ class Monitor extends BeanModel {
      * @returns {void}
      */
     static async sendStats(io, monitorID, userID) {
-        const hasClients = getTotalClientInRoom(io, userID) > 0;
+        const hasClients = getMonitorSubscribersCount(io, monitorID) > 0;
         let uptimeCalculator = await UptimeCalculator.getUptimeCalculator(monitorID);
 
         if (hasClients) {
             // Send 24 hour average ping
             let data24h = await uptimeCalculator.get24Hour();
-            io.to(userID).emit("avgPing", monitorID, data24h.avgPing ? Number(data24h.avgPing.toFixed(2)) : null);
+            emitToMonitor(io, monitorID, "avgPing", monitorID, data24h.avgPing ? Number(data24h.avgPing.toFixed(2)) : null);
 
             // Send 24 hour uptime
-            io.to(userID).emit("uptime", monitorID, 24, data24h.uptime);
+            emitToMonitor(io, monitorID, "uptime", monitorID, 24, data24h.uptime);
 
             // Send 30 day uptime
             let data30d = await uptimeCalculator.get30Day();
-            io.to(userID).emit("uptime", monitorID, 720, data30d.uptime);
+            emitToMonitor(io, monitorID, "uptime", monitorID, 720, data30d.uptime);
 
             // Send 1-year uptime
             let data1y = await uptimeCalculator.get1Year();
-            io.to(userID).emit("uptime", monitorID, "1y", data1y.uptime);
+            emitToMonitor(io, monitorID, "uptime", monitorID, "1y", data1y.uptime);
 
             // Send Cert Info
-            await Monitor.sendCertInfo(io, monitorID, userID);
+            await Monitor.sendCertInfo(io, monitorID);
 
             // Send domain info
-            await Monitor.sendDomainInfo(io, monitorID, userID);
+            await Monitor.sendDomainInfo(io, monitorID);
         } else {
             log.debug("monitor", "No clients in the room, no need to send stats");
         }
@@ -1392,13 +1394,12 @@ class Monitor extends BeanModel {
      * Send certificate information to client
      * @param {Server} io Socket server instance
      * @param {number} monitorID ID of monitor to send
-     * @param {number} userID ID of user to send to
-     * @returns {void}
+     * @returns {Promise<void>}
      */
-    static async sendCertInfo(io, monitorID, userID) {
+    static async sendCertInfo(io, monitorID) {
         let tlsInfo = await R.findOne("monitor_tls_info", "monitor_id = ?", [monitorID]);
         if (tlsInfo != null) {
-            io.to(userID).emit("certInfo", monitorID, tlsInfo.info_json);
+            emitToMonitor(io, monitorID, "certInfo", monitorID, tlsInfo.info_json);
         }
     }
 
@@ -1406,17 +1407,16 @@ class Monitor extends BeanModel {
      * Send domain name information to client
      * @param {Server} io Socket server instance
      * @param {number} monitorID ID of monitor to send
-     * @param {number} userID ID of user to send to
-     * @returns {void}
+     * @returns {Promise<void>}
      */
-    static async sendDomainInfo(io, monitorID, userID) {
+    static async sendDomainInfo(io, monitorID) {
         const monitor = await R.findOne("monitor", "id = ?", [monitorID]);
 
         try {
             const supportInfo = await DomainExpiry.checkSupport(monitor);
             const domain = await DomainExpiry.findByDomainNameOrCreate(supportInfo.domain);
             if (domain?.expiry) {
-                io.to(userID).emit("domainInfo", monitorID, domain.daysRemaining, new Date(domain.expiry));
+                emitToMonitor(io, monitorID, "domainInfo", monitorID, domain.daysRemaining, new Date(domain.expiry));
             }
         } catch (e) {}
     }
