@@ -1105,7 +1105,7 @@ class Monitor extends BeanModel {
             // Send to frontend
             log.debug("monitor", `[${this.name}] Send to socket`);
             emitToMonitor(io, this.id, "heartbeat", bean.toJSON());
-            Monitor.sendStats(io, this.id, this.user_id);
+            Monitor.sendStats(io, this.id, this.user_id, this);
 
             // Store to database
             log.debug("monitor", `[${this.name}] Store`);
@@ -1358,9 +1358,10 @@ class Monitor extends BeanModel {
      * @param {Server} io Socket server instance
      * @param {number} monitorID ID of monitor to send
      * @param {number} userID ID of user to send to
+     * @param {object} monitor Monitor bean (optional, to skip redundant DB lookup in sendDomainInfo)
      * @returns {void}
      */
-    static async sendStats(io, monitorID, userID) {
+    static async sendStats(io, monitorID, userID, monitor = null) {
         const hasClients = getMonitorSubscribersCount(io, monitorID) > 0;
         let uptimeCalculator = await UptimeCalculator.getUptimeCalculator(monitorID);
 
@@ -1380,11 +1381,11 @@ class Monitor extends BeanModel {
             let data1y = await uptimeCalculator.get1Year();
             emitToMonitor(io, monitorID, "uptime", monitorID, "1y", data1y.uptime);
 
-            // Send Cert Info
-            await Monitor.sendCertInfo(io, monitorID);
-
-            // Send domain info
-            await Monitor.sendDomainInfo(io, monitorID);
+            // Send Cert Info and domain info in parallel
+            await Promise.all([
+                Monitor.sendCertInfo(io, monitorID),
+                Monitor.sendDomainInfo(io, monitorID, monitor),
+            ]);
         } else {
             log.debug("monitor", "No clients in the room, no need to send stats");
         }
@@ -1407,10 +1408,13 @@ class Monitor extends BeanModel {
      * Send domain name information to client
      * @param {Server} io Socket server instance
      * @param {number} monitorID ID of monitor to send
+     * @param {object} monitor Monitor bean (optional, skips redundant DB lookup)
      * @returns {Promise<void>}
      */
-    static async sendDomainInfo(io, monitorID) {
-        const monitor = await R.findOne("monitor", "id = ?", [monitorID]);
+    static async sendDomainInfo(io, monitorID, monitor = null) {
+        if (!monitor) {
+            monitor = await R.findOne("monitor", "id = ?", [monitorID]);
+        }
 
         try {
             const supportInfo = await DomainExpiry.checkSupport(monitor);
@@ -1509,8 +1513,7 @@ class Monitor extends BeanModel {
             let msg = `[${monitor.name}] [${text}] ${bean.msg}`;
 
             const heartbeatJSON = await bean.toJSONAsync({ decodeResponse: true });
-            const monitorData = [{ id: monitor.id, active: monitor.active, name: monitor.name }];
-            const preloadData = await Monitor.preparePreloadData(monitorData);
+            const preloadData = await Monitor.preparePreloadData([monitor]);
             // Prevent if the msg is undefined, notifications such as Discord cannot send out.
             if (!heartbeatJSON["msg"]) {
                 heartbeatJSON["msg"] = "N/A";
@@ -1849,11 +1852,15 @@ class Monitor extends BeanModel {
     }
 
     /**
-     * prepare preloaded data for efficient access
-     * @param {Array} monitorData IDs & active field of monitor to get
+     * prepare preloaded data for efficient access.
+     * Original implementation did O(N) recursive DB calls per call site (5N
+     * queries for N monitors). This in-memory version does 3 batch queries
+     * (notifications, tags, maintenance relationships) and walks the parent /
+     * children graphs in memory.
+     * @param {Array} monitorList Full monitor beans loaded from DB
      * @returns {Promise<LooseObject<any>>} object
      */
-    static async preparePreloadData(monitorData) {
+    static async preparePreloadData(monitorList) {
         const notificationsMap = new Map();
         const tagsMap = new Map();
         const maintenanceStatusMap = new Map();
@@ -1862,21 +1869,38 @@ class Monitor extends BeanModel {
         const forceInactiveMap = new Map();
         const pathsMap = new Map();
 
-        if (monitorData.length > 0) {
-            const monitorIDs = monitorData.map((monitor) => monitor.id);
+        if (monitorList.length > 0) {
+            const monitorIDs = monitorList.map((monitor) => monitor.id);
+
+            const monitorMap = new Map();
+            for (const monitor of monitorList) {
+                monitorMap.set(monitor.id, monitor);
+            }
+
+            const childrenOfParent = new Map();
+            for (const monitor of monitorList) {
+                if (monitor.parent != null) {
+                    if (!childrenOfParent.has(monitor.parent)) {
+                        childrenOfParent.set(monitor.parent, []);
+                    }
+                    childrenOfParent.get(monitor.parent).push(monitor);
+                }
+            }
+
             const notifications = await Monitor.getMonitorNotification(monitorIDs);
             const tags = await Monitor.getMonitorTag(monitorIDs);
-            const maintenanceStatuses = await Promise.all(
-                monitorData.map((monitor) => Monitor.isUnderMaintenance(monitor.id))
+
+            const maintenanceRows = await R.getAll(
+                `SELECT monitor_id, maintenance_id FROM monitor_maintenance WHERE monitor_id IN (${monitorIDs.map(() => "?").join(",")})`,
+                monitorIDs
             );
-            const childrenIDs = await Promise.all(monitorData.map((monitor) => Monitor.getAllChildrenIDs(monitor.id)));
-            const activeStatuses = await Promise.all(
-                monitorData.map((monitor) => Monitor.isActive(monitor.id, monitor.active))
-            );
-            const forceInactiveStatuses = await Promise.all(
-                monitorData.map((monitor) => Monitor.isParentActive(monitor.id))
-            );
-            const paths = await Promise.all(monitorData.map((monitor) => Monitor.getAllPath(monitor.id, monitor.name)));
+            const maintenanceMap = new Map();
+            for (const row of maintenanceRows) {
+                if (!maintenanceMap.has(row.monitor_id)) {
+                    maintenanceMap.set(row.monitor_id, []);
+                }
+                maintenanceMap.get(row.monitor_id).push(row.maintenance_id);
+            }
 
             notifications.forEach((row) => {
                 if (!notificationsMap.has(row.monitor_id)) {
@@ -1898,25 +1922,16 @@ class Monitor extends BeanModel {
                 });
             });
 
-            monitorData.forEach((monitor, index) => {
-                maintenanceStatusMap.set(monitor.id, maintenanceStatuses[index]);
-            });
+            for (const monitor of monitorList) {
+                maintenanceStatusMap.set(monitor.id, await Monitor.isUnderMaintenanceInMemory(monitor.id, monitorMap, maintenanceMap));
+                childrenIDsMap.set(monitor.id, Monitor.getAllChildrenIDsInMemory(monitor.id, childrenOfParent));
 
-            monitorData.forEach((monitor, index) => {
-                childrenIDsMap.set(monitor.id, childrenIDs[index]);
-            });
+                const parentActive = Monitor.isParentActiveInMemory(monitor.id, monitorMap);
+                activeStatusMap.set(monitor.id, monitor.active === 1 && parentActive);
+                forceInactiveMap.set(monitor.id, !parentActive);
 
-            monitorData.forEach((monitor, index) => {
-                activeStatusMap.set(monitor.id, activeStatuses[index]);
-            });
-
-            monitorData.forEach((monitor, index) => {
-                forceInactiveMap.set(monitor.id, !forceInactiveStatuses[index]);
-            });
-
-            monitorData.forEach((monitor, index) => {
-                pathsMap.set(monitor.id, paths[index]);
-            });
+                pathsMap.set(monitor.id, Monitor.getAllPathInMemory(monitor.id, monitor.name, monitorMap));
+            }
         }
 
         return {
@@ -1928,6 +1943,126 @@ class Monitor extends BeanModel {
             forceInactive: forceInactiveMap,
             paths: pathsMap,
         };
+    }
+
+    /**
+     * Check if monitor or any ancestor is under maintenance, using in-memory maps.
+     * @param {number} monitorID ID of the monitor
+     * @param {Map} monitorMap Map of monitorID -> monitor bean
+     * @param {Map} maintenanceMap Map of monitorID -> maintenanceID[]
+     * @returns {Promise<boolean>} Is under maintenance
+     */
+    static async isUnderMaintenanceInMemory(monitorID, monitorMap, maintenanceMap) {
+        let currentID = monitorID;
+        const visited = new Set();
+
+        while (currentID != null && !visited.has(currentID)) {
+            visited.add(currentID);
+
+            const maintenanceIDs = maintenanceMap.get(currentID);
+            if (maintenanceIDs) {
+                for (const maintenanceID of maintenanceIDs) {
+                    const maintenance = await UptimeKumaServer.getInstance().getMaintenance(maintenanceID);
+                    if (maintenance && (await maintenance.isUnderMaintenance())) {
+                        return true;
+                    }
+                }
+            }
+
+            const monitor = monitorMap.get(currentID);
+            if (!monitor || monitor.parent == null) {
+                break;
+            }
+            currentID = monitor.parent;
+        }
+
+        return false;
+    }
+
+    /**
+     * Get all children IDs recursively using in-memory children map.
+     * @param {number} monitorID ID of the monitor
+     * @param {Map} childrenOfParent Map of parentID -> childMonitor[]
+     * @returns {Array} IDs of all children
+     */
+    static getAllChildrenIDsInMemory(monitorID, childrenOfParent) {
+        const children = childrenOfParent.get(monitorID);
+        if (!children) {
+            return [];
+        }
+
+        let childrenIDs = [];
+        for (const child of children) {
+            childrenIDs.push(child.id);
+            childrenIDs = childrenIDs.concat(Monitor.getAllChildrenIDsInMemory(child.id, childrenOfParent));
+        }
+        return childrenIDs;
+    }
+
+    /**
+     * Check if parent (ancestors) are active, using in-memory map.
+     * @param {number} monitorID ID of the monitor
+     * @param {Map} monitorMap Map of monitorID -> monitor bean
+     * @returns {boolean} Is the parent active
+     */
+    static isParentActiveInMemory(monitorID, monitorMap) {
+        let currentID = monitorID;
+        const visited = new Set();
+
+        while (currentID != null && !visited.has(currentID)) {
+            visited.add(currentID);
+
+            const monitor = monitorMap.get(currentID);
+            if (!monitor || monitor.parent == null) {
+                return true;
+            }
+
+            const parent = monitorMap.get(monitor.parent);
+            if (!parent) {
+                return true;
+            }
+
+            if (parent.active !== 1) {
+                return false;
+            }
+
+            currentID = parent.id;
+        }
+
+        return true;
+    }
+
+    /**
+     * Get full path using in-memory map.
+     * @param {number} monitorID ID of the monitor
+     * @param {string} name Name of the monitor
+     * @param {Map} monitorMap Map of monitorID -> monitor bean
+     * @returns {Array} Full path
+     */
+    static getAllPathInMemory(monitorID, name, monitorMap) {
+        const path = [ name ];
+
+        let currentID = monitorID;
+        const visited = new Set();
+
+        while (currentID != null && !visited.has(currentID)) {
+            visited.add(currentID);
+
+            const monitor = monitorMap.get(currentID);
+            if (!monitor || monitor.parent == null) {
+                break;
+            }
+
+            const parent = monitorMap.get(monitor.parent);
+            if (!parent) {
+                break;
+            }
+
+            path.unshift(parent.name);
+            currentID = parent.id;
+        }
+
+        return path;
     }
 
     /**

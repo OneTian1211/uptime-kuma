@@ -272,12 +272,7 @@ class UptimeKumaServer {
 
         const monitorList = await R.find("monitor", query + "ORDER BY weight DESC, name", queryParams);
 
-        const monitorData = monitorList.map((monitor) => ({
-            id: monitor.id,
-            active: monitor.active,
-            name: monitor.name,
-        }));
-        const preloadData = await Monitor.preparePreloadData(monitorData);
+        const preloadData = await Monitor.preparePreloadData(monitorList);
 
         const result = {};
         monitorList.forEach((monitor) => (result[monitor.id] = monitor.toJSON(preloadData)));

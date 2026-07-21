@@ -995,8 +995,7 @@ let needSetup = false;
                 log.info("monitor", `Get Monitor: ${monitorID} User ID: ${socket.userID}`);
 
                 let monitor = await R.findOne("monitor", " id = ? AND user_id = ? ", [monitorID, socket.userID]);
-                const monitorData = [{ id: monitor.id, active: monitor.active }];
-                const preloadData = await Monitor.preparePreloadData(monitorData);
+                const preloadData = await Monitor.preparePreloadData([monitor]);
                 callback({
                     ok: true,
                     monitor: monitor.toJSON(preloadData),

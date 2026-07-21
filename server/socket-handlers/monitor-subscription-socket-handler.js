@@ -120,12 +120,7 @@ module.exports.monitorSubscriptionSocketHandler = (socket) => {
                 [ socket.userID, numParentID ]
             );
 
-            const monitorData = list.map((m) => ({
-                id: m.id,
-                active: m.active,
-                name: m.name,
-            }));
-            const preloadData = await Monitor.preparePreloadData(monitorData);
+            const preloadData = await Monitor.preparePreloadData(list);
 
             const result = {};
             list.forEach((m) => (result[m.id] = m.toJSON(preloadData)));
