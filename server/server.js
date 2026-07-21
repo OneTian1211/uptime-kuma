@@ -163,6 +163,7 @@ const testMode = !!args["test"] || false;
 const {
     sendNotificationList,
     sendHeartbeatList,
+    sendLastHeartbeatBatch,
     sendInfo,
     sendProxyList,
     sendDockerHostList,
@@ -1811,7 +1812,12 @@ async function afterLogin(socket, user) {
 
     // Send root-only monitor list; child monitors are loaded on demand
     // when the client subscribes via monitorSubscriptionSocketHandler.
-    await server.sendMonitorList(socket, { rootOnly: true });
+    const monitorList = await server.sendMonitorList(socket, { rootOnly: true });
+
+    // Batch-send the latest heartbeat for each root monitor so the Quick Stats
+    // counters populate immediately, before the per-monitor heartbeatList
+    // subscription round trips complete.
+    await sendLastHeartbeatBatch(socket, monitorList);
 
     await Promise.allSettled([
         sendInfo(socket),

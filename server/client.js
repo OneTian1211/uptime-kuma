@@ -64,6 +64,50 @@ async function sendHeartbeatList(socket, monitorID, toUser = false, overwrite = 
 }
 
 /**
+ * Batch-send the latest heartbeat for every monitor so the Quick Stats numbers
+ * on the dashboard populate immediately after login, before the per-monitor
+ * `heartbeatList` round trips complete. Single SQL + single emit, regardless
+ * of monitor count. The frontend temporarily stores each beat as a 1-element
+ * array under `heartbeatList[monitorID]`; the subsequent full heartbeatList
+ * event replaces it.
+ * @param {Socket} socket Socket.io instance
+ * @param {object} monitorList Monitor map keyed by monitorID (only those will receive beats)
+ * @param {boolean} toUser True = broadcast to all sockets of the user, False = current socket only
+ * @returns {Promise<void>}
+ */
+async function sendLastHeartbeatBatch(socket, monitorList, toUser = false) {
+    const monitorIDs = Object.keys(monitorList);
+    if (monitorIDs.length === 0) {
+        return;
+    }
+
+    const placeholders = monitorIDs.map(() => "?").join(",");
+    const list = await R.getAll(
+        `
+        SELECT h.* FROM heartbeat h
+        INNER JOIN (
+            SELECT monitor_id, MAX(time) AS max_time
+            FROM heartbeat
+            WHERE monitor_id IN (${placeholders})
+            GROUP BY monitor_id
+        ) latest ON h.monitor_id = latest.monitor_id AND h.time = latest.max_time
+        `,
+        monitorIDs
+    );
+
+    const batch = {};
+    for (const beat of list) {
+        batch[beat.monitor_id] = [ beat ];
+    }
+
+    if (toUser) {
+        io.to(socket.userID).emit("lastHeartbeatBatch", batch);
+    } else {
+        socket.emit("lastHeartbeatBatch", batch);
+    }
+}
+
+/**
  * Important Heart beat list (aka event list)
  * @param {Socket} socket Socket.io instance
  * @param {number} monitorID ID of monitor to send heartbeat history
@@ -239,6 +283,7 @@ module.exports = {
     sendNotificationList,
     sendImportantHeartbeatList,
     sendHeartbeatList,
+    sendLastHeartbeatBatch,
     sendProxyList,
     sendAPIKeyList,
     sendInfo,

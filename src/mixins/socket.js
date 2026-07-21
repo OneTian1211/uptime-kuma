@@ -265,6 +265,17 @@ export default {
                 }
             });
 
+            // Batch arrival of the latest heartbeat for each root monitor,
+            // sent once right after login so the dashboard Quick Stats counters
+            // populate immediately. Each monitor's heartbeatList temporarily
+            // holds a 1-element array; the subsequent heartbeatList event with
+            // overwrite=true replaces it with the full history.
+            socket.on("lastHeartbeatBatch", (batch) => {
+                for (const monitorID in batch) {
+                    this.heartbeatList[monitorID] = batch[monitorID];
+                }
+            });
+
             socket.on("heartbeatList", (monitorID, data, overwrite = false) => {
                 if (!(monitorID in this.heartbeatList) || overwrite) {
                     this.heartbeatList[monitorID] = data;
