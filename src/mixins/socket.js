@@ -58,6 +58,14 @@ export default {
             proxyList: [],
             subscribedMonitorIDs: new Set(),
             loadedGroupChildren: new Set(),
+            // Quick-Stats aggregate pushed by the server before the paged
+            // monitorList frames start arriving.  Falls back to the `stats`
+            // computed once monitorList merging is complete.
+            monitorSummary: null,
+            // Pages of monitorList frames received so far.  Used to deduplicate
+            // retries / out-of-order delivery.
+            loadedMonitorPages: new Set(),
+            monitorListComplete: false,
             connectionErrorMsg: `${this.$t("Cannot connect to the socket server.")} ${this.$t("Reconnecting...")}`,
             showReverseProxyGuide: true,
             cloudflared: {
@@ -153,6 +161,50 @@ export default {
                 }
             });
 
+            socket.on("monitorSummary", (data) => {
+                this.monitorSummary = data;
+            });
+
+            socket.on("monitorListPage", (data) => {
+                if (!data || !data.monitors) {
+                    return;
+                }
+                if (this.loadedMonitorPages.has(data.pageIndex)) {
+                    return;
+                }
+                this.loadedMonitorPages.add(data.pageIndex);
+
+                this.assignMonitorUrlParser(data.monitors);
+
+                // First page: reset stale state (fresh login).
+                if (data.pageIndex === 0) {
+                    this.monitorList = {};
+                    this.subscribedMonitorIDs = new Set();
+                    this.loadedGroupChildren = new Set();
+                    this.loadedMonitorPages = new Set();
+                }
+
+                Object.entries(data.monitors).forEach(([ monitorID, monitor ]) => {
+                    this.monitorList[monitorID] = monitor;
+                });
+
+                // Subscribe only to root monitors in this page so realtime
+                // heartbeat / uptime / avgPing / certInfo / domainInfo events
+                // arrive as soon as the page is in.  Children are subscribed
+                // lazily on group expand via getMonitorChildren.
+                const rootIDs = Object.values(data.monitors)
+                    .filter((m) => m.parent === null)
+                    .map((m) => m.id);
+                if (rootIDs.length > 0) {
+                    this.subscribeMonitors(rootIDs);
+                }
+            });
+
+            socket.on("monitorListComplete", () => {
+                this.monitorListComplete = true;
+                this.subscribeCurrentRouteMonitor();
+            });
+
             socket.on("monitorList", (data) => {
                 this.assignMonitorUrlParser(data);
                 this.monitorList = data;
@@ -161,6 +213,8 @@ export default {
                 // child-load tracking so the new session starts clean.
                 this.subscribedMonitorIDs = new Set();
                 this.loadedGroupChildren = new Set();
+                this.loadedMonitorPages = new Set();
+                this.monitorListComplete = true;
 
                 // Subscribe to root monitors so we receive their realtime
                 // heartbeat / uptime / avgPing / certInfo / domainInfo events.
@@ -925,6 +979,21 @@ export default {
         },
 
         stats() {
+            // Prefer the server-precomputed snapshot for instant render.
+            // Fall back to the live iteration once monitorList merging is
+            // complete (which keeps the counts reactive to new heartbeats).
+            if (this.monitorSummary && !this.monitorListComplete) {
+                return {
+                    active: this.monitorSummary.active,
+                    up: this.monitorSummary.up,
+                    down: this.monitorSummary.down,
+                    maintenance: this.monitorSummary.maintenance,
+                    pending: this.monitorSummary.pending,
+                    unknown: this.monitorSummary.unknown,
+                    pause: this.monitorSummary.pause,
+                };
+            }
+
             let result = {
                 active: 0,
                 up: 0,

@@ -1809,9 +1809,14 @@ async function afterLogin(socket, user) {
     socket.userID = user.id;
     socket.join(user.id);
 
-    // Send root-only monitor list; child monitors are loaded on demand
-    // when the client subscribes via monitorSubscriptionSocketHandler.
-    const monitorList = await server.sendMonitorList(socket, { rootOnly: true });
+    // Send root-only monitor list (slim + paged: omit description, path,
+    // notificationIDList, forceInactive, type-specific config and sensitive
+    // fields; deliver summary first then one frame per 200 monitors so the
+    // first WebSocket frame stays small even with thousands of monitors).
+    // The full object for any monitor is delivered on-demand via getMonitor /
+    // getMonitorChildren / updateMonitorIntoList when the user opens the
+    // edit or details page.
+    const monitorList = await server.sendMonitorList(socket, { rootOnly: true, slim: true, paged: true });
 
     // Batch-send the latest heartbeat for each root monitor so the Quick Stats
     // counters populate immediately, before the per-monitor heartbeatList

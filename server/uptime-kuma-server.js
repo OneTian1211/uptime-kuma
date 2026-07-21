@@ -220,11 +220,39 @@ class UptimeKumaServer {
      * @param {Socket} socket Socket to send list on
      * @param {object} opts Options
      * @param {boolean} opts.rootOnly If true, only return root (parent IS NULL) monitors
+     * @param {boolean} opts.slim If true, only emit the fields needed to render the dashboard list
+     * @param {boolean} opts.paged If true, split the payload into one `monitorSummary`
+     * event followed by N `monitorListPage` events and a final `monitorListComplete`
+     * event so the first frame stays small even with thousands of monitors.
+     * When false (default), emits a single `monitorList` event as before.
      * @returns {Promise<object>} List of monitors
      */
     async sendMonitorList(socket, opts = {}) {
         const list = await this.getMonitorJSONList(socket.userID, null, opts);
-        this.io.to(socket.userID).emit("monitorList", list);
+
+        if (opts.paged) {
+            const { sendMonitorSummary } = require("./client");
+            await sendMonitorSummary(socket, list);
+
+            const ids = Object.keys(list);
+            const pageSize = 200;
+            const totalPages = Math.max(1, Math.ceil(ids.length / pageSize));
+            for (let i = 0; i < totalPages; i++) {
+                const pageIds = ids.slice(i * pageSize, (i + 1) * pageSize);
+                const monitors = {};
+                for (const id of pageIds) {
+                    monitors[id] = list[id];
+                }
+                socket.emit("monitorListPage", {
+                    pageIndex: i,
+                    totalPages,
+                    monitors,
+                });
+            }
+            socket.emit("monitorListComplete", { total: ids.length, totalPages });
+        } else {
+            this.io.to(socket.userID).emit("monitorList", list);
+        }
         return list;
     }
 
@@ -279,7 +307,7 @@ class UptimeKumaServer {
         const preloadData = await Monitor.preparePreloadData(monitorList);
 
         const result = {};
-        monitorList.forEach((monitor) => (result[monitor.id] = monitor.toJSON(preloadData)));
+        monitorList.forEach((monitor) => (result[monitor.id] = monitor.toJSON(preloadData, true, opts.slim || false)));
         return result;
     }
 

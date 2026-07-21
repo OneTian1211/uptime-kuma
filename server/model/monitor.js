@@ -167,13 +167,37 @@ class Monitor extends BeanModel {
      * @param {object} preloadData to prevent n+1 problems, we query the data in a batch outside of this function
      * @param {boolean} includeSensitiveData Include sensitive data in
      * JSON
+     * @param {boolean} slim If true, return only the fields needed to render
+     * the dashboard list (id, name, type, parent, active, url, interval,
+     * weight, tags, childrenIDs, maintenance). Omit description, path,
+     * notificationIDList, forceInactive, all type-specific config fields and
+     * all sensitive data. Used by the initial `monitorList` push so the first
+     * frame stays small regardless of monitor count.
      * @returns {object} Object ready to parse
      */
-    toJSON(preloadData = {}, includeSensitiveData = true) {
+    toJSON(preloadData = {}, includeSensitiveData = true, slim = false) {
         let screenshot = null;
 
         if (this.type === "real-browser") {
             screenshot = "/screenshots/" + jwt.sign(this.id, UptimeKumaServer.getInstance().jwtSecret) + ".png";
+        }
+
+        if (slim) {
+            return {
+                id: this.id,
+                name: this.name,
+                type: this.type,
+                subtype: this.subtype,
+                parent: this.parent,
+                active: preloadData.activeStatus.get(this.id),
+                url: this.url,
+                interval: this.interval,
+                weight: this.weight,
+                tags: preloadData.tags.get(this.id) || [],
+                childrenIDs: preloadData.childrenIDs.get(this.id) || [],
+                maintenance: preloadData.maintenanceStatus.get(this.id),
+                includeSensitiveData: false,
+            };
         }
 
         const path = preloadData.paths.get(this.id) || [];

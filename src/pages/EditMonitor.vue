@@ -3911,10 +3911,13 @@ message HealthCheckResponse {
                 };
 
                 const cached = this.$root.monitorList[this.$route.params.id];
-                if (cached) {
-                    // Zero RTT: read from already-subscribed monitorList; deep-clone
-                    // so editing/saving does not mutate the shared reference that
-                    // updateMonitorIntoList will overwrite later.
+                // Zero RTT: read from already-subscribed monitorList; deep-clone
+                // so editing/saving does not mutate the shared reference that
+                // updateMonitorIntoList will overwrite later.
+                // Falls back to getMonitor when the cached entry is a slim
+                // payload (missing sensitive data / notificationIDList) produced
+                // by the initial slim monitorList push.
+                if (cached && cached.includeSensitiveData !== false) {
                     applyMonitor(JSON.parse(JSON.stringify(cached)));
                 } else {
                     // Fallback: deep-link to a child monitor not yet loaded into monitorList.
