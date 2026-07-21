@@ -62,6 +62,10 @@ export default {
             // monitorList frames start arriving.  Falls back to the `stats`
             // computed once monitorList merging is complete.
             monitorSummary: null,
+            // First page of important heartbeats + total count pushed by the
+            // server right after login so the Dashboard event table renders
+            // without the monitorImportantHeartbeatListCount/Paged round trips.
+            importantHeartbeatsInitial: null,
             // Pages of monitorList frames received so far.  Used to deduplicate
             // retries / out-of-order delivery.
             loadedMonitorPages: new Set(),
@@ -328,6 +332,10 @@ export default {
                 for (const monitorID in batch) {
                     this.heartbeatList[monitorID] = batch[monitorID];
                 }
+            });
+
+            socket.on("importantHeartbeatsInitial", (data) => {
+                this.importantHeartbeatsInitial = data;
             });
 
             socket.on("heartbeatList", (monitorID, data, overwrite = false) => {

@@ -164,6 +164,7 @@ const {
     sendNotificationList,
     sendHeartbeatList,
     sendLastHeartbeatBatch,
+    sendImportantHeartbeatsInitial,
     sendInfo,
     sendProxyList,
     sendDockerHostList,
@@ -1832,6 +1833,7 @@ async function afterLogin(socket, user) {
         sendAPIKeyList(socket),
         sendRemoteBrowserList(socket),
         sendMonitorTypeList(socket),
+        sendImportantHeartbeatsInitial(socket),
     ]);
 
     await StatusPage.sendStatusPageList(io, socket);

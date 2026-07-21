@@ -227,6 +227,32 @@ async function sendImportantHeartbeatList(socket, monitorID, toUser = false, ove
 }
 
 /**
+ * Push the first page of important heartbeats plus the total count in a
+ * single emit so the Dashboard event table can render without waiting for
+ * the monitorImportantHeartbeatListCount + monitorImportantHeartbeatListPaged
+ * round trips. Mirrors the semantics of those two handlers (important = 1,
+ * no monitor filter) so pagination beyond page 1 stays consistent.
+ * @param {Socket} socket Socket.io instance
+ * @param {number} perPage Page size for the initial page
+ * @returns {Promise<void>}
+ */
+async function sendImportantHeartbeatsInitial(socket, perPage = 25) {
+    const list = await R.find(
+        "heartbeat",
+        `important = 1 ORDER BY time DESC LIMIT ?`,
+        [perPage]
+    );
+
+    const count = await R.count("heartbeat", "important = 1");
+
+    socket.emit("importantHeartbeatsInitial", {
+        total: count,
+        entries: list.map((bean) => bean.toJSON()),
+        perPage,
+    });
+}
+
+/**
  * Emit proxy list to client
  * @param {Socket} socket Socket.io socket instance
  * @returns {Promise<Bean[]>} List of proxies
@@ -368,6 +394,7 @@ async function sendMonitorTypeList(socket) {
 module.exports = {
     sendNotificationList,
     sendImportantHeartbeatList,
+    sendImportantHeartbeatsInitial,
     sendHeartbeatList,
     sendLastHeartbeatBatch,
     sendMonitorSummary,

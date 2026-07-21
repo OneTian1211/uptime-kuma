@@ -180,14 +180,25 @@ export default {
     },
 
     mounted() {
-        this.getImportantHeartbeatListLength();
-
-        this.$root.emitter.on("newImportantHeartbeat", this.onNewImportantHeartbeat);
-
         this.initialPerPage = this.perPage;
 
         window.addEventListener("resize", this.updatePerPage);
         this.updatePerPage();
+
+        const initial = this.$root.importantHeartbeatsInitial;
+        if (initial) {
+            this.importantHeartBeatListLength = initial.total;
+            this.displayedRecords = initial.entries.slice(0, this.perPage);
+            // Large viewports may need more rows than the initial page
+            // carries; refetch the first page with the correct perPage.
+            if (this.perPage > initial.entries.length && initial.total > initial.entries.length) {
+                this.getImportantHeartbeatListPaged();
+            }
+        } else {
+            this.getImportantHeartbeatListLength();
+        }
+
+        this.$root.emitter.on("newImportantHeartbeat", this.onNewImportantHeartbeat);
     },
 
     beforeUnmount() {
