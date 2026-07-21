@@ -126,25 +126,6 @@
         </header>
 
         <main>
-            <!--
-                Pre-login placeholder: render the Quick Stats heading
-                immediately so LCP fires before the socket.io login round-trip
-                completes.  The heading is static text — it does not depend on
-                any server data — so showing it early is safe.  Once loggedIn
-                becomes true the real <router-view> renders DashboardHome which
-                contains the same <h1>, and this placeholder is removed in the
-                same reactive tick (no layout shift).
-            -->
-            <div
-                v-if="!$root.loggedIn && !$root.allowLoginDialog && $route.path.startsWith('/dashboard')"
-                class="container-fluid"
-            >
-                <div class="row">
-                    <div class="col-12 col-md-7 col-xl-8 mb-3 gx-0">
-                        <h1 class="mb-3">{{ $t("Quick Stats") }}</h1>
-                    </div>
-                </div>
-            </div>
             <router-view v-if="$root.loggedIn" />
             <Login v-if="!$root.loggedIn && $root.allowLoginDialog" />
         </main>
