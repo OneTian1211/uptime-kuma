@@ -39,7 +39,7 @@ module.exports.monitorSubscriptionSocketHandler = (socket) => {
                     // so the client can render status immediately without
                     // waiting for the next realtime beat (up to 60s).
                     promises.push(sendHeartbeatList(socket, numId, false, true));
-                    promises.push(Monitor.sendStats(io, numId, socket.userID));
+                    promises.push(Monitor.sendStats(io, numId, socket.userID, null, true));
                 }
             }
 

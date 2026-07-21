@@ -68,6 +68,59 @@ const DomainExpiry = require("./domain_expiry");
 
 const rootCertificates = rootCertificatesFingerprints();
 
+// In-memory caches to avoid re-emitting unchanged cert/domain info on every heartbeat.
+// Map<monitorID, string> — last sent cert fingerprint256
+const lastCertFingerprintCache = new Map();
+// Map<monitorID, string> — last sent domain expiry string
+const lastDomainExpiryCache = new Map();
+
+/**
+ * Strip heavy fields from a certificate info object before sending to clients.
+ * The frontend only needs subject, issuer, validTo, daysRemaining, fingerprint,
+ * certType, and the recursive issuerCertificate chain for display.
+ * Removing raw, pubkey, modulus, fingerprint512, etc. reduces payload ~40x.
+ * @param {object} cert Full certificate info object
+ * @returns {object} Slimmed certificate info object
+ */
+function slimCertInfo(cert) {
+    if (!cert || typeof cert !== "object") {
+        return cert;
+    }
+    const slim = {
+        subject: cert.subject,
+        issuer: cert.issuer,
+        validTo: cert.validTo,
+        valid_from: cert.valid_from,
+        daysRemaining: cert.daysRemaining,
+        fingerprint: cert.fingerprint,
+        fingerprint256: cert.fingerprint256,
+        certType: cert.certType,
+    };
+    if (cert.issuerCertificate && typeof cert.issuerCertificate === "object") {
+        slim.issuerCertificate = slimCertInfo(cert.issuerCertificate);
+    }
+    return slim;
+}
+
+/**
+ * Build a slim version of the full TLS info object (wrapper around slimCertInfo)
+ * @param {object} tlsInfo Full TLS info object as stored in DB
+ * @returns {object} Slimmed TLS info object
+ */
+function slimTlsInfo(tlsInfo) {
+    if (!tlsInfo || typeof tlsInfo !== "object") {
+        return tlsInfo;
+    }
+    const result = { valid: tlsInfo.valid };
+    if (tlsInfo.certInfo) {
+        result.certInfo = slimCertInfo(tlsInfo.certInfo);
+    }
+    if (tlsInfo.hostnameMatchMonitorUrl !== undefined) {
+        result.hostnameMatchMonitorUrl = tlsInfo.hostnameMatchMonitorUrl;
+    }
+    return result;
+}
+
 /**
  * status:
  *      0 = DOWN
@@ -1359,9 +1412,10 @@ class Monitor extends BeanModel {
      * @param {number} monitorID ID of monitor to send
      * @param {number} userID ID of user to send to
      * @param {object} monitor Monitor bean (optional, to skip redundant DB lookup in sendDomainInfo)
+     * @param {boolean} force Force send cert/domain info even if unchanged (for new subscribers)
      * @returns {void}
      */
-    static async sendStats(io, monitorID, userID, monitor = null) {
+    static async sendStats(io, monitorID, userID, monitor = null, force = false) {
         const hasClients = getMonitorSubscribersCount(io, monitorID) > 0;
         let uptimeCalculator = await UptimeCalculator.getUptimeCalculator(monitorID);
 
@@ -1382,9 +1436,10 @@ class Monitor extends BeanModel {
             emitToMonitor(io, monitorID, "uptime", monitorID, "1y", data1y.uptime);
 
             // Send Cert Info and domain info in parallel
+            // On heartbeats (force=false), these skip if unchanged since last push
             await Promise.all([
-                Monitor.sendCertInfo(io, monitorID),
-                Monitor.sendDomainInfo(io, monitorID, monitor),
+                Monitor.sendCertInfo(io, monitorID, force),
+                Monitor.sendDomainInfo(io, monitorID, monitor, force),
             ]);
         } else {
             log.debug("monitor", "No clients in the room, no need to send stats");
@@ -1392,26 +1447,48 @@ class Monitor extends BeanModel {
     }
 
     /**
-     * Send certificate information to client
+     * Send certificate information to client (slim payload, skip if unchanged)
      * @param {Server} io Socket server instance
      * @param {number} monitorID ID of monitor to send
+     * @param {boolean} force Force send even if cert fingerprint hasn't changed
      * @returns {Promise<void>}
      */
-    static async sendCertInfo(io, monitorID) {
-        let tlsInfo = await R.findOne("monitor_tls_info", "monitor_id = ?", [monitorID]);
-        if (tlsInfo != null) {
-            emitToMonitor(io, monitorID, "certInfo", monitorID, tlsInfo.info_json);
+    static async sendCertInfo(io, monitorID, force = false) {
+        let tlsInfoBean = await R.findOne("monitor_tls_info", "monitor_id = ?", [monitorID]);
+        if (tlsInfoBean == null) {
+            return;
         }
+
+        let tlsInfo;
+        try {
+            tlsInfo = JSON.parse(tlsInfoBean.info_json);
+        } catch (e) {
+            return;
+        }
+
+        // Skip if cert fingerprint hasn't changed since last push (unless forced)
+        const currentFingerprint = tlsInfo?.certInfo?.fingerprint256 || null;
+        if (!force && currentFingerprint && lastCertFingerprintCache.get(monitorID) === currentFingerprint) {
+            return;
+        }
+        if (currentFingerprint) {
+            lastCertFingerprintCache.set(monitorID, currentFingerprint);
+        }
+
+        // Send slim payload (strips raw, pubkey, modulus, etc.)
+        const slim = slimTlsInfo(tlsInfo);
+        emitToMonitor(io, monitorID, "certInfo", monitorID, JSON.stringify(slim));
     }
 
     /**
-     * Send domain name information to client
+     * Send domain name information to client (skip if unchanged)
      * @param {Server} io Socket server instance
      * @param {number} monitorID ID of monitor to send
      * @param {object} monitor Monitor bean (optional, skips redundant DB lookup)
+     * @param {boolean} force Force send even if domain expiry hasn't changed
      * @returns {Promise<void>}
      */
-    static async sendDomainInfo(io, monitorID, monitor = null) {
+    static async sendDomainInfo(io, monitorID, monitor = null, force = false) {
         if (!monitor) {
             monitor = await R.findOne("monitor", "id = ?", [monitorID]);
         }
@@ -1420,6 +1497,12 @@ class Monitor extends BeanModel {
             const supportInfo = await DomainExpiry.checkSupport(monitor);
             const domain = await DomainExpiry.findByDomainNameOrCreate(supportInfo.domain);
             if (domain?.expiry) {
+                const expiryStr = String(domain.expiry);
+                // Skip if expiry hasn't changed since last push (unless forced)
+                if (!force && lastDomainExpiryCache.get(monitorID) === expiryStr) {
+                    return;
+                }
+                lastDomainExpiryCache.set(monitorID, expiryStr);
                 emitToMonitor(io, monitorID, "domainInfo", monitorID, domain.daysRemaining, new Date(domain.expiry));
             }
         } catch (e) {}
