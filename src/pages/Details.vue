@@ -485,6 +485,10 @@ export default {
             cacheTime: Date.now(),
             importantHeartBeatListLength: 0,
             displayedRecords: [],
+            // Full monitor payload fetched on demand. The initial monitorList
+            // frame is slim (omits path / hostname / description etc. used by
+            // this page); we fetch the full record when entering the route.
+            monitorDetail: null,
             pushMonitor: {
                 showPushExamples: false,
                 currentExample: "javascript-fetch",
@@ -496,6 +500,12 @@ export default {
     computed: {
         monitor() {
             let id = this.$route.params.id;
+            // Prefer the full payload fetched below over the slim entry in
+            // monitorList so fields like path / hostname / description are
+            // available.
+            if (this.monitorDetail && String(this.monitorDetail.id) === String(id)) {
+                return this.monitorDetail;
+            }
             return this.$root.monitorList[id];
         },
 
@@ -612,6 +622,22 @@ export default {
         },
         "pushMonitor.currentExample"() {
             this.loadPushExample();
+        },
+        // Fetch the full monitor detail whenever the route id changes
+        // (covers both initial mount and in-app navigation between monitors).
+        "$route.params.id": {
+            immediate: true,
+            handler(id) {
+                this.monitorDetail = null;
+                if (!id) {
+                    return;
+                }
+                this.$root.getSocket().emit("getMonitor", id, (res) => {
+                    if (res && res.ok && res.monitor && String(res.monitor.id) === String(id)) {
+                        this.monitorDetail = res.monitor;
+                    }
+                });
+            },
         },
     },
 
