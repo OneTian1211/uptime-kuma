@@ -143,6 +143,10 @@ class UptimeKumaServer {
 
         this.io = new Server(this.httpServer, {
             cors,
+            pingInterval: 30000,
+            pingTimeout: 30000,
+            upgradeTimeout: 30000,
+            maxHttpBufferSize: 1e6,
             allowRequest: async (req, callback) => {
                 let transport;
                 // It should be always true, but just in case, because this property is not documented
