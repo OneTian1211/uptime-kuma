@@ -154,6 +154,12 @@ export default {
             importantHeartBeatListLength: 0,
             displayedRecords: [],
             clearingAllEvents: false,
+            // True once the first page of important events has been applied
+            // to displayedRecords (either from the server push or the RPC
+            // fallback). Guards against the race where the initial push
+            // arrives after DashboardHome mounts and against the fallback
+            // RPC landing on top of an already-applied initial payload.
+            initialEventsHandled: false,
         };
     },
     computed: {
@@ -177,6 +183,16 @@ export default {
         page() {
             this.getImportantHeartbeatListPaged();
         },
+
+        // Server pushes the first page + total in afterLogin; on slow links
+        // this can land after DashboardHome has already mounted. Adopt it
+        // whenever it arrives so we never fall back to the RPC round trips
+        // unless the push truly never comes.
+        "$root.importantHeartbeatsInitial"(initial) {
+            if (initial && !this.initialEventsHandled) {
+                this.applyImportantInitial(initial);
+            }
+        },
     },
 
     mounted() {
@@ -185,20 +201,13 @@ export default {
         window.addEventListener("resize", this.updatePerPage);
         this.updatePerPage();
 
-        const initial = this.$root.importantHeartbeatsInitial;
-        if (initial) {
-            this.importantHeartBeatListLength = initial.total;
-            this.displayedRecords = initial.entries.slice(0, this.perPage);
-            // Large viewports may need more rows than the initial page
-            // carries; refetch the first page with the correct perPage.
-            if (this.perPage > initial.entries.length && initial.total > initial.entries.length) {
-                this.getImportantHeartbeatListPaged();
-            }
-        } else {
-            this.getImportantHeartbeatListLength();
-        }
-
         this.$root.emitter.on("newImportantHeartbeat", this.onNewImportantHeartbeat);
+
+        if (this.$root.importantHeartbeatsInitial) {
+            this.applyImportantInitial(this.$root.importantHeartbeatsInitial);
+        } else {
+            this.loadImportantInitialViaRpc();
+        }
     },
 
     beforeUnmount() {
@@ -230,6 +239,49 @@ export default {
         getGroupId(monitorID) {
             const monitor = this.$root.monitorList[monitorID];
             return monitor && monitor.parent != null ? monitor.parent : null;
+        },
+
+        /**
+         * Apply the first page of important heartbeats pushed by the server
+         * right after login. Marks the initial load as handled so the RPC
+         * fallback (or any later watch.perPage/page triggered refetch) won't
+         * overwrite this payload with stale data.
+         * @param {object} initial { total, entries, perPage } pushed by afterLogin
+         * @returns {void}
+         */
+        applyImportantInitial(initial) {
+            this.initialEventsHandled = true;
+            this.importantHeartBeatListLength = initial.total;
+            this.displayedRecords = initial.entries.slice(0, this.perPage);
+            // Large viewports may need more rows than the initial page
+            // carries; refetch the first page with the correct perPage.
+            if (this.perPage > initial.entries.length && initial.total > initial.entries.length) {
+                this.getImportantHeartbeatListPaged();
+            }
+        },
+
+        /**
+         * RPC fallback used only when the afterLogin push of the first page
+         * has not arrived by the time DashboardHome mounts. Abandon the
+         * fallback as soon as the push lands (the watcher above will pick
+         * it up) so we don't overwrite a fresher payload with stale data.
+         * @returns {void}
+         */
+        loadImportantInitialViaRpc() {
+            this.$root.getSocket().emit("monitorImportantHeartbeatListCount", null, (res) => {
+                if (this.initialEventsHandled || !res || !res.ok) {
+                    return;
+                }
+                this.importantHeartBeatListLength = res.count;
+                const offset = (this.page - 1) * this.perPage;
+                this.$root.getSocket().emit("monitorImportantHeartbeatListPaged", null, offset, this.perPage, (cb) => {
+                    if (this.initialEventsHandled || !cb || !cb.ok) {
+                        return;
+                    }
+                    this.initialEventsHandled = true;
+                    this.displayedRecords = cb.data;
+                });
+            });
         },
 
         /**

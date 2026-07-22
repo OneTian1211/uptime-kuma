@@ -24,3 +24,5 @@ extra/exe-builder/obj
 
 .vs
 .vscode
+
+.opencode
