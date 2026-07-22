@@ -587,6 +587,9 @@ export default {
         },
 
         group() {
+            if (!this.monitor?.path) {
+                return "";
+            }
             return this.monitor.path.slice(0, -1).join(" / ");
         },
 

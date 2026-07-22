@@ -175,6 +175,9 @@ export default {
     },
     watch: {
         perPage() {
+            if (!this.initialEventsHandled) {
+                return;
+            }
             this.$nextTick(() => {
                 this.getImportantHeartbeatListPaged();
             });
