@@ -239,7 +239,11 @@ export default {
                 Object.entries(data).forEach(([monitorID, updatedMonitor]) => {
                     this.monitorList[monitorID] = updatedMonitor;
                 });
-                this.subscribeMonitors(Object.keys(data).map((id) => parseInt(id)));
+                this.subscribeMonitors(
+                    Object.keys(data)
+                        .map((id) => parseInt(id))
+                        .filter((id) => data[id] && data[id].active)
+                );
             });
 
             socket.on("deleteMonitorFromList", (monitorID) => {

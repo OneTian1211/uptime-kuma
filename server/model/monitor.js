@@ -191,6 +191,8 @@ class Monitor extends BeanModel {
                 parent: this.parent,
                 active: preloadData.activeStatus.get(this.id),
                 url: this.url,
+                hostname: this.hostname,
+                port: this.port,
                 interval: this.interval,
                 weight: this.weight,
                 tags: preloadData.tags.get(this.id) || [],

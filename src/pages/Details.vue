@@ -608,6 +608,11 @@ export default {
                 return "";
             }
         },
+
+        currentListActive() {
+            const id = this.$route.params.id;
+            return this.$root.monitorList[id]?.active;
+        },
     },
 
     watch: {
@@ -641,6 +646,16 @@ export default {
                     }
                 });
             },
+        },
+
+        // monitorDetail is preferred over monitorList by the monitor()
+        // computed, but updateMonitorIntoList only updates monitorList.
+        // Sync active so the pause / resume button reflects the real state
+        // without requiring a full re-fetch.
+        currentListActive(newActive) {
+            if (this.monitorDetail && newActive !== undefined && this.monitorDetail.active !== newActive) {
+                this.monitorDetail.active = newActive;
+            }
         },
     },
 

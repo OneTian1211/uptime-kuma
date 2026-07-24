@@ -265,7 +265,6 @@ class UptimeKumaServer {
     async sendUpdateMonitorIntoList(socket, monitorID) {
         const list = await this.getMonitorJSONList(socket.userID, monitorID);
         if (list && list[monitorID]) {
-            this.io.to(`monitor_${monitorID}`).emit("updateMonitorIntoList", list);
             this.io.to(socket.userID).emit("updateMonitorIntoList", list);
         }
     }
@@ -277,7 +276,6 @@ class UptimeKumaServer {
      * @returns {Promise<void>}
      */
     async sendDeleteMonitorFromList(socket, monitorID) {
-        this.io.to(`monitor_${monitorID}`).emit("deleteMonitorFromList", monitorID);
         this.io.to(socket.userID).emit("deleteMonitorFromList", monitorID);
     }
 
